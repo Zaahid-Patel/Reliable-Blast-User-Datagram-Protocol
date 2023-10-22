@@ -1,0 +1,220 @@
+diff --git a/GUI/ConnectionSelectionSender.java b/GUI/ConnectionSelectionSender.java
+index 67bb623..78b6479 100644
+--- a/GUI/ConnectionSelectionSender.java
++++ b/GUI/ConnectionSelectionSender.java
+@@ -56,8 +56,8 @@ public class ConnectionSelectionSender extends JFrame {
+                         num, path);
+                 System.out.println("Running RBUDP Server");
+                 server.start();
+-                // ProgressBar bar = new ProgressBar();
+-                // bar.run();
++                ProgressBar bar = new ProgressBar();
++                bar.run();
+             }
+         });
+ 
+@@ -69,4 +69,4 @@ public class ConnectionSelectionSender extends JFrame {
+ 
+     public static void main(String[] args) {
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/received_files/test.txt b/received_files/test.txt
+deleted file mode 100644
+index 44f59c1..0000000
+--- a/received_files/test.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-This is a random test file
+diff --git a/receiver/TCPReceiver.java b/receiver/TCPReceiver.java
+index e0d7f5a..e055099 100644
+--- a/receiver/TCPReceiver.java
++++ b/receiver/TCPReceiver.java
+@@ -38,7 +38,7 @@ public class TCPReceiver extends Thread {
+             }
+ 
+              //Get total bytes expected from file
+-            ByteBuffer buf = ByteBuffer.allocate(1024);
++            ByteBuffer buf = ByteBuffer.allocate(dataSize);
+             int bytesRead = senderChannel.read(buf);
+              
+             byte[] sequenceNumBuffer = new byte[4];
+@@ -74,14 +74,15 @@ public class TCPReceiver extends Thread {
+                 int bytesReadFile = senderChannel.read(bufFile);
+ 
+                 if (bytesReadFile != 0) {
+-                    if (bytesReadFile == -1) {
+-                        System.out.println("got to end");
+-                        break;
+-                    }
++                    
+                     addBytes(bytesReadFile);
+                     bufFile.flip();
+                     fileChannel.write(bufFile);
+                     bufFile.clear();
++                    if (bytesReadFile == -1) {
++                        System.out.println("got to end");
++                        break;
++                    }
+                 
+                 }
+             }
+diff --git a/receiver/UDPReceiver.java b/receiver/UDPReceiver.java
+index 43864ed..6770ead 100644
+--- a/receiver/UDPReceiver.java
++++ b/receiver/UDPReceiver.java
+@@ -61,19 +61,25 @@ public class UDPReceiver extends Thread {
+                 ByteBuffer buf = ByteBuffer.allocate(dataSize);
+                 buf.rewind();
+                 SocketAddress address = udpChannel.receive(buf);
++                if (buf.position() != 0) {
++                    System.out.println(buf.position());
++                }
+ 
+-                int length = buf.limit();
++                // System.out.println("Buf size: " + buf.position());
++                // int length = buf.limit();
+                 if (getNewFile()) {
+                     if (!getReady()) {
+                         tcpSignaller.succFilenameSet(true);
+                         ready = true;
+                     }
+-                    for (int i = 2; i < buf.limit(); i++) {
+-                        if (buf.get(i) == 0) {
+-                            length = i;
+-                            break;
+-                        }
+-                    }
++                    
++                    // for (int i = buf.limit() - 1; i > 2 ; i--) {
++                    //     // System.out.println(buf.get(i+1));
++                    //     if (buf.get(i) != 0) {
++                    //         length = i + 1;
++                    //         break;
++                    //     }
++                    // }
+                     if (checkAllDataReceived()) {
+                         System.out.println("All data received");
+                         createFile();
+@@ -90,8 +96,15 @@ public class UDPReceiver extends Thread {
+                         short seqNumShort = seqNumBuffer.getShort();
+                         System.out.println("recieved seq num: " + seqNumShort);
+ 
+-                        byte[] data = new byte[length - 2];
+-                        buf.get(data, 0, length - 2);
++                        byte[] sizeByte = new byte[2];
++                        buf.get(sizeByte, 0, 2);
++
++                        buf.position(2);
++                        ByteBuffer sizeBuffer = ByteBuffer.wrap(sizeByte);
++                        short length = sizeBuffer.getShort();
++
++                        byte[] data = new byte[length - 4];
++                        buf.get(data, 0, length - 4);
+                         ByteBuffer dataBuffer = ByteBuffer.wrap(data);
+ 
+                         
+@@ -212,6 +225,7 @@ public class UDPReceiver extends Thread {
+     public synchronized void receiveFile(String name, int packetCount) {
+         clearData();
+         System.out.println("Start listening for udp signals");
++        System.out.println(newFile);
+         if (!newFile) {
+             fileName = name;
+             expectedPacketCount = packetCount;
+diff --git a/run_receiver.sh b/run_receiver.sh
+index 2b4206c..29d3fec 100755
+--- a/run_receiver.sh
++++ b/run_receiver.sh
+@@ -1,2 +1,2 @@
+ javac receiver/MainReceiver.java receiver/TCPReceiver.java receiver/TCPSignaller.java receiver/UDPReceiver.java
+-java receiver/MainReceiver 1234 127.0.1.1 9999 tcp
++java receiver/MainReceiver 1234 127.0.1.1 9999 udp
+diff --git a/run_sender.sh b/run_sender.sh
+index 66e575d..23c9c5a 100755
+--- a/run_sender.sh
++++ b/run_sender.sh
+@@ -1,2 +1,2 @@
+ javac sender/MainSender.java sender/SenderTCP.java sender/SenderTCPListener.java sender/SenderTCPSignaller.java sender/SenderTCPSignalListener.java sender/SenderUDP.java
+-java sender/MainSender 9999 send_files/test_big.txt tcp
++java sender/MainSender 9999 send_files/test_big.txt udp
+diff --git a/sender/MainSender.java b/sender/MainSender.java
+index ae0985d..fa05d59 100644
+--- a/sender/MainSender.java
++++ b/sender/MainSender.java
+@@ -14,19 +14,19 @@ import java.nio.channels.*;
+ public class MainSender {
+ 
+     public static void main(String args[]) {
+-        // if (args[2].equals("udp")) {
+-        //     SenderTCPSignalListener server = new SenderTCPSignalListener(
+-        //             Integer.parseInt(args[0]), args[1]);
+-        //     System.out.println("Running RBUDP Server");
+-        //     server.start();
+-        // } else {
+-        //     SenderTCPListener server = new SenderTCPListener(
+-        //             Integer.parseInt(args[0]), args[1]);
+-        //     System.out.println("Running TCP Server");
+-        //     server.start();
+-        // }
+-        ConnectionSelectionSender window2 = new ConnectionSelectionSender();
+-            window2.run();
++        if (args[2].equals("udp")) {
++            SenderTCPSignalListener server = new SenderTCPSignalListener(
++                    Integer.parseInt(args[0]), args[1]);
++            System.out.println("Running RBUDP Server");
++            server.start();
++        } else {
++            SenderTCPListener server = new SenderTCPListener(
++                    Integer.parseInt(args[0]), args[1]);
++            System.out.println("Running TCP Server");
++            server.start();
++        }
++        //ConnectionSelectionSender window2 = new ConnectionSelectionSender();
++        //    window2.run();
+     }
+ 
+ }
+diff --git a/sender/SenderUDP.java b/sender/SenderUDP.java
+index fc83866..315f6ab 100644
+--- a/sender/SenderUDP.java
++++ b/sender/SenderUDP.java
+@@ -102,7 +102,7 @@ public class SenderUDP extends Thread {
+                         } catch (IOException e) {
+                             e.printStackTrace();
+                         }
+-                        i++;    
++                        i++;
+                     }
+                 }
+ 			    
+@@ -114,6 +114,11 @@ public class SenderUDP extends Thread {
+                 // }
+                 
+                 // resent = true;
++                try {
++                    Thread.sleep(100);
++                } catch (InterruptedException e) {
++                    e.printStackTrace();
++                }
+                 signaller.sendPacketsSent(packetsSent);
+                 send = false;
+             } else {
+@@ -209,13 +214,14 @@ public class SenderUDP extends Thread {
+                 i++;
+             }
+ 
+-            setArray(ByteBuffer.allocate(dataSize + 2), i);
++            setArray(ByteBuffer.allocate(dataSize + 4), i);
+             // System.out.println(Arrays.toString(buffer));
+             // System.out.println("Buffer ");
+ 
+-            getArray(i).position(2);
++            getArray(i).position(4);
+             getArray(i).put(buffer, 0, dataSize);
+             getArray(i).putShort(0, currentPacketNumber);
++            getArray(i).putShort(2,(short) bufferSize);
+             buffer = new byte[dataSize];
+             // System.out.println(Arrays.toString(dataArray[i].array()));
+             currentPacketNumber++;

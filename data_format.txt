@@ -1,0 +1,20 @@
+Initial TCP Signal that sends Receiver's port and host address
+    Format: Byte array with total 124 bytes.
+    First 24 bytes is the portNumber
+    Last 100 bytes are the host address
+
+This is only an arbratrary selected amount, subject to change
+
+Code that should be able to read incoming bytes
+[combined] is the incoming packet
+NOTE does not remove blank bytes
+//TESTCODE
+    byte[] port = Arrays.copyOfRange(combined, 0, 24);
+    ByteBuffer buffer = ByteBuffer.wrap(port);
+    int intValue = buffer.getInt();
+    System.out.println(intValue);
+    
+    byte[] name = Arrays.copyOfRange(combined, 24, 124);
+    String stringValue = new String(name);
+    System.out.println(stringValue);
+    
